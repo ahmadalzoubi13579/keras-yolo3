@@ -12,11 +12,14 @@ from keras import backend as K
 from keras.models import load_model
 from keras.layers import Input
 from PIL import Image, ImageFont, ImageDraw
+from tensorflow.python.ops.math_ops import truediv
 
 from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
 import os
 from keras.utils import multi_gpu_model
+
+import requests
 
 class YOLO(object):
     _defaults = {
@@ -43,6 +46,10 @@ class YOLO(object):
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
+        self.true_person = False
+        self.person_counter = 0
+        self.person_counts = 20
+        self.alarm = False
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -99,6 +106,16 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
+    def send_post_request(self):
+        import requests
+
+        URL = "https://httpbin.org/post"
+        DATA={
+            "token": ""
+        }
+
+        x= requests.post(url=URL, data=DATA)
+
     def detect_image(self, image):
         start = timer()
 
@@ -130,37 +147,54 @@ class YOLO(object):
                     size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
 
-        for i, c in reversed(list(enumerate(out_classes))):
-            predicted_class = self.class_names[c]
-            box = out_boxes[i]
-            score = out_scores[i]
+        if(0 in out_classes):
+            self.person_counter += 1
+            if(self.person_counter == self.person_counts):
+                self.true_person = True
+        else:
+            self.person_counter = 0
+            self.true_person = False
+        
+        if(self.true_person):
+            
+            if(not self.alarm):
+                # self.send_post_request()
+                self.alarm = True
 
-            label = '{} {:.2f}'.format(predicted_class, score)
-            draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font)
+            for i, c in reversed(list(enumerate(out_classes))):
+                predicted_class = self.class_names[c]
+                box = out_boxes[i]
+                score = out_scores[i]
 
-            top, left, bottom, right = box
-            top = max(0, np.floor(top + 0.5).astype('int32'))
-            left = max(0, np.floor(left + 0.5).astype('int32'))
-            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            print(label, (left, top), (right, bottom))
+                if(predicted_class!='person'):
+                    continue
+                    
+                label = '{} {:.2f}'.format(predicted_class, score)
+                draw = ImageDraw.Draw(image)
+                label_size = draw.textsize(label, font)
 
-            if top - label_size[1] >= 0:
-                text_origin = np.array([left, top - label_size[1]])
-            else:
-                text_origin = np.array([left, top + 1])
+                top, left, bottom, right = box
+                top = max(0, np.floor(top + 0.5).astype('int32'))
+                left = max(0, np.floor(left + 0.5).astype('int32'))
+                bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+                right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+                print(label, (left, top), (right, bottom))
 
-            # My kingdom for a good redistributable image drawing library.
-            for i in range(thickness):
+                if top - label_size[1] >= 0:
+                    text_origin = np.array([left, top - label_size[1]])
+                else:
+                    text_origin = np.array([left, top + 1])
+
+                # My kingdom for a good redistributable image drawing library.
+                for i in range(thickness):
+                    draw.rectangle(
+                        [left + i, top + i, right - i, bottom - i],
+                        outline=self.colors[c])
                 draw.rectangle(
-                    [left + i, top + i, right - i, bottom - i],
-                    outline=self.colors[c])
-            draw.rectangle(
-                [tuple(text_origin), tuple(text_origin + label_size)],
-                fill=self.colors[c])
-            draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-            del draw
+                    [tuple(text_origin), tuple(text_origin + label_size)],
+                    fill=self.colors[c])
+                draw.text(text_origin, label, fill=(0, 0, 0), font=font)
+                del draw
 
         end = timer()
         print(end - start)
@@ -171,7 +205,9 @@ class YOLO(object):
 
 def detect_video(yolo, video_path, output_path=""):
     import cv2
-    vid = cv2.VideoCapture(video_path)
+    # vid = cv2.VideoCapture(video_path)
+    # for webcame
+    vid = cv2.VideoCapture(0)
     if not vid.isOpened():
         raise IOError("Couldn't open webcam or video")
     video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
