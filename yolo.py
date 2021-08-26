@@ -109,12 +109,16 @@ class YOLO(object):
     def send_post_request(self):
         import requests
 
-        URL = "https://httpbin.org/post"
-        DATA={
-            "token": ""
+        url = "http://192.168.1.102:5000/api/triggers/fire?auth=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJUcmlnZ2VyQ3JlYXRvcklkIjoiMSIsIlRyaWdnZXJJZCI6ImQ1MzUwMWYyLWZhZDUtNDFmNi04NTE2LWJjZmIyNGM0NThhYyIsIm5iZiI6MTYyOTUwMDgwNiwiZXhwIjozNTIyOTU2ODA2LCJpYXQiOjE2Mjk1MDA4MDZ9.NVWma68Vbq1sE6nDuIUXYAd5GzCMx0kbPRZcM6hvBks"
+
+        payload="{\r\n    \"ValueType\": 0,\r\n    \"Value\": \"Alarm\"\r\n}\r\n"
+        headers = {
+          'Content-Type': 'application/json'
         }
 
-        x= requests.post(url=URL, data=DATA)
+        response = requests.request("GET", url, headers=headers, data=payload)
+
+        print(response.text)
 
     def detect_image(self, image):
         start = timer()
@@ -158,7 +162,7 @@ class YOLO(object):
         if(self.true_person):
             
             if(not self.alarm):
-                # self.send_post_request()
+                self.send_post_request()
                 self.alarm = True
 
             for i, c in reversed(list(enumerate(out_classes))):
@@ -205,9 +209,9 @@ class YOLO(object):
 
 def detect_video(yolo, video_path, output_path=""):
     import cv2
-    vid = cv2.VideoCapture(video_path)
+    # vid = cv2.VideoCapture(video_path)
     # for webcame
-    # vid = cv2.VideoCapture(0)
+    vid = cv2.VideoCapture(0)
     if not vid.isOpened():
         raise IOError("Couldn't open webcam or video")
     video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
