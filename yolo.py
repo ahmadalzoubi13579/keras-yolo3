@@ -21,6 +21,31 @@ from keras.utils import multi_gpu_model
 
 import requests
 
+import face_recognition
+import cv2
+
+known_face_encodings = []
+known_face_names = []
+
+# Initialize some variables
+face_locations = []
+face_encodings = []
+face_names = []
+process_this_frame = True
+
+images_dir = "persons"
+
+for image_name in os.listdir(images_dir):
+  person_name = os.path.splitext(image_name)[0]
+  known_face_names.append(person_name)
+
+  image_path = os.path.join(images_dir, image_name)
+  person_image = face_recognition.load_image_file(image_path)
+  person_face_encoding = face_recognition.face_encodings(person_image)[0]
+  known_face_encodings.append(person_face_encoding)
+
+
+
 class YOLO(object):
     _defaults = {
         "model_path": 'model_data/yolo.h5',
@@ -107,7 +132,6 @@ class YOLO(object):
         return boxes, scores, classes
 
     def send_post_request(self):
-        import requests
 
         url = "http://192.168.1.102:5000/api/triggers/fire?auth=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJUcmlnZ2VyQ3JlYXRvcklkIjoiMSIsIlRyaWdnZXJJZCI6ImQ1MzUwMWYyLWZhZDUtNDFmNi04NTE2LWJjZmIyNGM0NThhYyIsIm5iZiI6MTYyOTUwMDgwNiwiZXhwIjozNTIyOTU2ODA2LCJpYXQiOjE2Mjk1MDA4MDZ9.NVWma68Vbq1sE6nDuIUXYAd5GzCMx0kbPRZcM6hvBks"
 
@@ -162,7 +186,7 @@ class YOLO(object):
         if(self.true_person):
             
             if(not self.alarm):
-                self.send_post_request()
+                # self.send_post_request()
                 self.alarm = True
 
             for i, c in reversed(list(enumerate(out_classes))):
@@ -207,8 +231,69 @@ class YOLO(object):
     def close_session(self):
         self.sess.close()
 
+def detect_faces(image):
+
+    global face_locations
+    global face_encodings
+    global face_names
+    global process_this_frame
+    
+    frame = image
+
+    # Resize frame of video to 1/4 size for faster face recognition processing
+    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+
+    # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
+    rgb_small_frame = small_frame[:, :, ::-1]
+
+    # Only process every other frame of video to save time
+    if process_this_frame:
+        # Find all the faces and face encodings in the current frame of video
+        face_locations = face_recognition.face_locations(rgb_small_frame)
+        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+
+        face_names = []
+        for face_encoding in face_encodings:
+            # See if the face is a match for the known face(s)
+            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+            name = "Unknown"
+
+            # # If a match was found in known_face_encodings, just use the first one.
+            # if True in matches:
+            #     first_match_index = matches.index(True)
+            #     name = known_face_names[first_match_index]
+
+            # Or instead, use the known face with the smallest distance to the new face
+            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+            best_match_index = np.argmin(face_distances)
+            if matches[best_match_index]:
+                name = known_face_names[best_match_index]
+
+            face_names.append(name)
+
+    process_this_frame = not process_this_frame
+
+
+    # Display the results
+    for (top, right, bottom, left), name in zip(face_locations, face_names):
+        # Scale back up face locations since the frame we detected in was scaled to 1/4 size
+        top *= 4
+        right *= 4
+        bottom *= 4
+        left *= 4
+
+        # Draw a box around the face
+        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+
+        # Draw a label with a name below the face
+        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
+        font = cv2.FONT_HERSHEY_DUPLEX
+        cv2.putText(frame, name, (left + 6, bottom - 6), font, 0.5, (255, 255, 255), 1)
+    
+    return frame
+
+
 def detect_video(yolo, video_path, output_path=""):
-    import cv2
     # vid = cv2.VideoCapture(video_path)
     # for webcame
     vid = cv2.VideoCapture(0)
@@ -231,6 +316,7 @@ def detect_video(yolo, video_path, output_path=""):
         image = Image.fromarray(frame)
         image = yolo.detect_image(image)
         result = np.asarray(image)
+        result = detect_faces(result)
         curr_time = timer()
         exec_time = curr_time - prev_time
         prev_time = curr_time
